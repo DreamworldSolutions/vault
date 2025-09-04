@@ -1,0 +1,44 @@
+{
+  "name": "@dreamworld/vault",
+  "version": "0.0.0-development",
+  "description": "It's used to store data securely in web applications.",
+  "main": "vault.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DreamworldSolutions/vault.git"
+  },
+  "keywords": [
+    "vault",
+    "secure",
+    "web",
+    "encryption",
+    "lock"
+  ],
+    "publishConfig": {
+    "access": "public"
+  },
+  "author": "Dhruval Kodinariya",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/DreamworldSolutions/vault/issues"
+  },
+  "homepage": "https://github.com/DreamworldSolutions/vault#readme",
+    "devDependencies": {
+    "semantic-release": "17.0.8"
+  },
+  "release": {
+    "branches": [
+      "+([0-9])?(.{+([0-9]),x}).x",
+      "main",
+      {
+          "name": "feature/*",
+          "prerelease": "${name.replace(/^feature\\//g, \"\")}",
+          "channel": "${name.replace(/^feature\\//g, \"\")}"
+      }
+    ]
+  }
+}
