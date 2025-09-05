@@ -1,32 +1,60 @@
 
 /**
- * Vault class to securely store and manage sensitive data.
- * It supports locking, unlocking, securing, and changing keys.
- * It emits events on state changes: 'unlock', 'secure', 'insecure', 'lock', 'destroy'.
  * 
- * How it works:
- * - The vault can be initialized with keys and settings.
- * - It can be locked and unlocked using a keyName and passcode.
- * - When unlocked, it can store, retrieve, and remove key-value pairs.
- * - It can be secured with new keys and changing keys.
- * - It can be made insecure by removing all keys.
- * - It can check its state (secure, locked, empty) and presence of specific keys.
- * - It can be destroyed, removing all data and requiring re-initialization.
+ * Storage:
+ * - Persistent storage (localStorage):
+ *  - Used to store keys, settings, and encrypted/plain text values.
+ * - In-memory storage (SessionStorage via `@dreamworld/session-storage`):
+ *  - Used to store decrypted values when vault is unlocked.
+ *  - Used to sync unlock state across tabs.
  * 
- * How it stores data securely:
- * - It uses localStorage for persistent storage.
- * - It stores keys and settings in persistent storage for re-initialization.
- * - If vault is secured then all stored values are encrypted.
- * - If vault is insecure then all stored values are in plain text.
- * - It uses `@dreamworld/session-storage` to store data in session storage when unlocked.
- * - When locked, all data in session storage is cleared.
+ * Initialization:
+ * - When no arguments are passed, initialized based on the last persisted keys & settings. It there are no persisted 
+ * keys, it fails to initialize.
+ * - If empty keys are passed, it initializes with empty keys and default settings. (Insecure mode). 
+ * - When keys are passed, it initializes with the given keys and settings. (Secure mode).
+ * - Settings are optional, if not passed, default settings are used.
+ * 
+ * Auto lock/unlock on initialization:
+ * - If session-storage has unlock details, it means the vault is unlocked.
+ * - If it doesn't have, it will be locked.
+ * 
+ * Lock:
+ * - It clears all data in session storage.
+ * 
+ * Unlock:
+ * - It decrypts all stored values and store in session storage.
+ * 
+ * Secure:
+ * - It encrypts all stored values.
+ * - How encryption works:
+ *  - It decrypts privateKey using the given passcode of the given keyName(authProvider).
+ *  - It encrypts all stored values using the decrypted privateKey.
+ * 
+ * Insecure:
+ * - It must be called when the vault is unlocked.
+ * - It removes all keys.
+ * - it decrypts all stored values and store in plain text in persistent storage.
+ * 
+ * Auto lock on inactivity:
+ * - It auto locks the vault if it is unlocked and there is no activity for the given `Settings.autoLockTimeout` period.
+ * - Default is 0 (no auto lock).
+ * - Activity means mouse move, key press, touch etc.
+ * 
+ * Events:
+ * - 'unlock': Dispatched when the vault is unlocked.
+ * - 'secure': Dispatched when the vault is made secure.
+ * - 'insecure': Dispatched when the vault is made insecure.
+ * - 'lock': Dispatched when the vault is locked.
+ * - 'destroy': Dispatched when the vault is destroyed.
  */
 export default class Vault extends EventEmitter {
 
   /**
    * It initializes the vault with the given keys and settings.
-   * When no arguments are passed, initialized based on the last persisted keys & settings. If none, it initializes with empty keys & default settings.
-   * It persists keys & settings are stored in persistent storage.
+   * When no arguments are passed, initialized based on the last persisted keys & settings. 
+   * If none, it initializes with empty keys & default settings.
+   * It persists keys & settings in localStorage.
    * @param {Object} { keys, settings } 
    * - keys: { $authProvider: $privateKey }, 
    *    - $authProvider: String (e.g: 'password', 'biometric:$deviceId' etc.)
