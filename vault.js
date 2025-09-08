@@ -193,9 +193,9 @@ export default class Vault extends EventEmitter {
       throw new Error('Vault is locked. Unlock first to store data.');
     }
 
-    const stringValue = typeof value === 'string' ? value : JSON.stringify(value);
     // Store in session for immediate access
-    this.sessionStorage.set(key, stringValue);
+    this.sessionStorage.set(key, value);
+    const stringValue = typeof value === 'string' ? value : JSON.stringify(value);
     
     if (this.isSecure()) {
       // Encrypt and store in persistent storage
