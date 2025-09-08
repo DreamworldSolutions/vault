@@ -59,6 +59,8 @@ export default class Vault extends EventEmitter {
     this.currentPrivateKey = null;
     this.autoLockTimer = null;
     this.activityListeners = [];
+    this.keys = null; // Cache keys in memory
+    this.settings = null; // Cache settings in memory
     this.defaultSettings = {
       autoLockTimeout: 0 // 0 means no auto lock
     };
@@ -87,6 +89,7 @@ export default class Vault extends EventEmitter {
     }
     
     vault.settings = persistedSettings || vault.defaultSettings;
+    vault.keys = persistedKeys; // Cache keys in memory
     
     // Check if vault was previously unlocked (cross-tab sync)
     const unlockState = vault.sessionStorage.get('unlockState');
@@ -125,6 +128,7 @@ export default class Vault extends EventEmitter {
     vault._persistKeys(keys);
     vault._persistSettings(settings);
     vault.settings = settings;
+    vault.keys = keys; // Cache keys in memory
     
 
     // Check if vault was previously unlocked (cross-tab sync)
@@ -149,7 +153,8 @@ export default class Vault extends EventEmitter {
    */
   async unlock(keyName, passcode) {
     try {
-      const keys = this._getPersistedKeys();
+      // Use cached keys for better performance
+      const keys = this.keys || this._getPersistedKeys();
       if (!keys || Object.keys(keys).length === 0) {
         throw new Error('Vault is not secure');
       }
@@ -256,6 +261,7 @@ export default class Vault extends EventEmitter {
     
     // Persist keys
     this._persistKeys(keys);
+    this.keys = keys; // Update cached keys
     
     // Set unlock state for cross-tab sync
     this.sessionStorage.set('unlockState', {
@@ -274,19 +280,12 @@ export default class Vault extends EventEmitter {
    * @param {Object} keys 
    */
   async changeKeys(keys) {
-    const noOfKeys = Object.keys(keys).length;
-
-    // Currently, insecure mode and new keys are provided.
-    if (!isSecure() && noOfKeys > 0) {
+    if (!this.isSecure()) {
       return;
     }
 
-    if (isSecure() && noOfKeys === 0) {
-      return;
-    }
-
-    // Persist keys
     this._persistKeys(keys);
+    this.keys = keys; // Update cached keys
   }
 
   /**
@@ -304,6 +303,7 @@ export default class Vault extends EventEmitter {
     
     // Remove keys
     localStorage.removeItem(`${this.storagePrefix}_keys`);
+    this.keys = null; // Clear cached keys
     this.currentPrivateKey = null;
     this.sessionStorage.remove('unlockState');
     
@@ -333,7 +333,8 @@ export default class Vault extends EventEmitter {
    * It checks if the vault is secure (has keys).
    */
   isSecure() {
-    const keys = this._getPersistedKeys();
+    // Use cached keys for better performance, fallback to persistent storage
+    const keys = this.keys || this._getPersistedKeys();
     return keys && Object.keys(keys).length > 0;
   }
 
@@ -390,6 +391,8 @@ export default class Vault extends EventEmitter {
     
     // Reset state
     this.currentPrivateKey = null;
+    this.keys = null; // Clear cached keys
+    this.settings = null; // Clear cached settings
     this._clearAutoLockTimer();
     this._removeActivityListeners();
     
