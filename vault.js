@@ -1,6 +1,8 @@
-import EventEmitter from 'eventemitter3';
+import EventEmitter from '@dreamworld/event-emitter/event-emitter.js';
 import SessionStorage from '@dreamworld/session-storage';
-import { getPrivateKeyFromPasscode, encrypt, decrypt } from './utils.js';
+import merge from 'lodash-es/merge.js';
+import has from 'lodash-es/has.js';
+import { getPrivateKeyFromPasscode, encrypt, decrypt, getBase64PrivateKey, privateKeyFromBase64 } from './utils.js';
 
 /**
  * 
@@ -13,8 +15,12 @@ import { getPrivateKeyFromPasscode, encrypt, decrypt } from './utils.js';
  *  - Used to sync unlock state across tabs.
  * 
  * Initialization:
- * - If keys aren't passed, it initializes with empty keys and default settings. (Insecure mode). 
- * - When keys are passed, it initializes with the given keys and settings. (Secure mode).
+ * - It first checks if session-storage has initialized data (`vault_initialized = true`).
+ * - If it has, it means the vault is already initialized. No need to anything.
+ * - If it doesn't have, it will initialize the vault from last persisted data.
+ * - It loads keys and settings from persistent storage if available.
+ * - If keys aren't available, it initializes with empty keys and default settings. (Insecure mode). 
+ * - When keys are available, it initializes with the given keys and settings. (Secure mode).
  * - Settings are optional, if not passed, default settings are used.
  * 
  * Auto lock/unlock on initialization:
@@ -51,96 +57,88 @@ import { getPrivateKeyFromPasscode, encrypt, decrypt } from './utils.js';
  * - 'destroy': Dispatched when the vault is destroyed.
  */
 export default class Vault extends EventEmitter {
+  static prefix = 'vault';
+  static dataPrefix = `${Vault.prefix}_data_`;
+  static defaultSettings = {
+    autoLockTimeout: 0 // 0 means no auto lock
+  };
   
   constructor() {
     super();
-    this.storagePrefix = 'vault';
-    this.sessionStorage = new SessionStorage('vault_session');
-    this.currentPrivateKey = null;
-    this.autoLockTimer = null;
-    this.activityListeners = [];
-    this.keys = null; // Cache keys in memory
-    this.settings = null; // Cache settings in memory
-    this.defaultSettings = {
-      autoLockTimeout: 0 // 0 means no auto lock
-    };
+    this._sessionStorage = new SessionStorage();
+
+    this._autoLockTimer = null;
+    this._activityListeners = [];
+
+    this._unlockPrivateKey = null;
+    this._init();
+    this._setupAutoLock();
   }
 
   /**
-   * It loads the vault from persistent storage.
-   * It returns a Vault instance.
-   * If the vault was previously unlocked (cross-tab sync), it restores the private key and loads decrypted data to session storage.
-   * It it's not possible to load (e.g: no persisted keys or corrupted data), it throws an error.
-   * @returns {Promise<Vault>}
+   * It initializes the vault data.
+   * If session storage has initialized data (`vault_initialized = true`), it means the vault is already initialized. No need to anything.
+   * If session storage doesn't have initialized data, it will initialize the vault from last persisted data.
+   * It loads keys and settings from persistent storage if available.
+   * If keys and settings aren't available, it initialize with empty keys and default settings.
+   * It stores keys and settings into session storage.
    */
-  static async load() {
-    const vault = new Vault();
-    
-    // Load persisted data - this will throw if data is not available or corrupted
-    const persistedKeys = vault._getPersistedKeys();
-    const persistedSettings = vault._getPersistedSettings();
-    
-    if (!persistedKeys) {
-      throw new Error('Vault load failed: No persistent keys found.');
+  _init() {
+    // Check if already initialized in this session
+    if (this._sessionStorage.get(this._getKey('initialized'))) {
+      this._syncUnlockPrivateKey();
+      return;
     }
-    
-    if (Object.keys(persistedKeys).length === 0) {
-      throw new Error('Vault load failed: Persistent keys are empty.');
+
+    // Load keys and settings from persistent storage
+    const keys = this._getPersistedKeys();
+    const settings = merge(
+      {},
+      this._getPersistedSettings(),
+      Vault.defaultSettings
+    );
+
+    // Store keys and settings in session storage for cross-tab access
+    this._sessionStorage.set(this._getKey('keys'), keys);
+    this._sessionStorage.set(this._getKey('settings'), settings);
+
+    // Set unlock state from session storage if available
+    this._syncUnlockPrivateKey();
+
+    // Mark as initialized
+    this._sessionStorage.set(this._getKey('initialized'), true);
+  }
+
+  _setUnlockKey(b64key) {
+    if (b64key) {
+      const privateKey = privateKeyFromBase64(b64key);
+      this._unlockPrivateKey = privateKey;
     }
-    
-    vault.settings = persistedSettings || vault.defaultSettings;
-    vault.keys = persistedKeys; // Cache keys in memory
-    
-    // Check if vault was previously unlocked (cross-tab sync)
-    const unlockState = vault.sessionStorage.get('unlockState');
-    if (unlockState) {
-      // Vault is unlocked, restore private key and load data
-      vault.currentPrivateKey = unlockState.privateKey;
-      await vault._loadDataToSession();
-    }
-    
-    vault._setupAutoLock();
-    return vault;
   }
 
   /**
-   * It initializes the vault with the given keys and settings.
-   * It persists keys and settings in localStorage for future initializations.
-   * If parameters isn't passed, it initializes with empty keys and default settings.
-   * If initialized with keys, it would be intialized with secure mode.
-   * If initialized without keys, it would be in insecure mode.
-   * If initialized with secure mode, it would be unlocked if session storage has unlock details, otherwise locked.
-   * @param {Object} { keys, settings } 
-   * - keys: { $authProvider: $privateKey }, 
-   *    - $authProvider: String (e.g: 'password', 'biometric:$deviceId' etc.)
-   *    - $privateKey: String (a 256-bit Key encrypted using passcode and encoded as Base64)
-   * - settings: { autoLockTimeout: Number (in ms) }
-   * @returns {Promise<Vault>}
+   * It sets the `_unlockPrivateKey` from session storage if available.
+   * And also listens to session storage changes to set the `_unlockPrivateKey` when changed in other tabs.
    */
-  static async initialize({ keys, settings } = {}) {
-    const vault = new Vault();
+  _syncUnlockPrivateKey() {
+    const key = this._sessionStorage.get(this._getKey('unlockPrivateKey'));
+    this._setUnlockKey(key);
 
-    // Set defaults if not provided
-    keys = keys || {};
-    settings = { ...vault.defaultSettings, ...settings };
+    this._sessionStorage.subscribe((changes) => {
+      if (!has(changes, this._getKey('unlockPrivateKey'))) {
+        return;
+      }
 
-    // Persist keys and settings
-    vault._persistKeys(keys);
-    vault._persistSettings(settings);
-    vault.settings = settings;
-    vault.keys = keys; // Cache keys in memory
-    
-
-    // Check if vault was previously unlocked (cross-tab sync)
-    const unlockState = vault.sessionStorage.get('unlockState');
-    if (unlockState && Object.keys(keys).length > 0) {
-      // Vault is unlocked, restore private key
-      vault.currentPrivateKey = unlockState.privateKey;
-      await vault._loadDataToSession();
-    }
-
-    vault._setupAutoLock();
-    return vault;
+      const key = this._sessionStorage.get(this._getKey('unlockPrivateKey'));
+      if (key && !this._unlockPrivateKey) {
+        this._setUnlockKey(key);
+        this.emit('unlock');
+        this._setupAutoLock();
+      } else if (!key && this._unlockPrivateKey) {
+        this._unlockPrivateKey = null;
+        this.emit('lock');
+      }
+    });
   }
 
   /**
@@ -154,28 +152,35 @@ export default class Vault extends EventEmitter {
   async unlock(keyName, passcode) {
     try {
       // Use cached keys for better performance
-      const keys = this.keys || this._getPersistedKeys();
+      const keys = this._sessionStorage.get(this._getKey('keys'));
       if (!keys || Object.keys(keys).length === 0) {
         throw new Error('Vault is not secure');
       }
 
-      this.currentPrivateKey = await getPrivateKeyFromPasscode(keyName, passcode, keys);
-      
-      // Store unlock state for cross-tab sync
-      this.sessionStorage.set('unlockState', { 
-        privateKey: this.currentPrivateKey,
-        keyName,
-        timestamp: Date.now()
-      });
+      this._unlockPrivateKey = await getPrivateKeyFromPasscode(keyName, passcode, keys);
 
       await this._loadDataToSession();
-      this._setupAutoLock();
+      
+      // Store unlock state for cross-tab sync
+      const b64UnlockedKey = await getBase64PrivateKey(this._unlockPrivateKey);
+      this._sessionStorage.set(this._getKey('unlockPrivateKey'), b64UnlockedKey);
+
+      // Dispatch `unlock` event
       this.emit('unlock');
+      this._setupAutoLock();
       return true;
     } catch (error) {
-      console.error('Failed to unlock vault:', error);
+      console.warn('Failed to unlock vault:', error);
       return false;
     }
+  }
+
+  _getDataKey(key) {
+    return `${Vault.dataPrefix + key}`;
+  }
+
+  _getKey(key) {
+    return `${Vault.prefix}_${key}`;
   }
 
   /**
@@ -193,8 +198,10 @@ export default class Vault extends EventEmitter {
       throw new Error('Vault is locked. Unlock first to store data.');
     }
 
+    key = this._getDataKey(key);
+
     // Store in session for immediate access
-    this.sessionStorage.set(key, value);
+    this._sessionStorage.set(key, value);
     const stringValue = typeof value === 'string' ? value : JSON.stringify(value);
     
     if (this.isSecure()) {
@@ -202,7 +209,7 @@ export default class Vault extends EventEmitter {
       this._encryptAndStore(key, stringValue);
     } else {
       // Store directly in localStorage for insecure mode
-      localStorage.setItem(`${this.storagePrefix}_data_${key}`, stringValue);
+      localStorage.setItem(key, stringValue);
     }
   }
 
@@ -220,7 +227,7 @@ export default class Vault extends EventEmitter {
     }
 
     // Get from session storage
-    const value = this.sessionStorage.get(key);
+    const value = this._sessionStorage.get(this._getDataKey(key));
     return value;
   }
 
@@ -236,8 +243,9 @@ export default class Vault extends EventEmitter {
       throw new Error('Vault is locked. Unlock first to remove data.');
     }
 
-    this.sessionStorage.remove(key);
-    localStorage.removeItem(`${this.storagePrefix}_data_${key}`);
+    key = this._getDataKey(key);
+    this._sessionStorage.remove(key);
+    localStorage.removeItem(key);
   }
 
   /**
@@ -254,24 +262,21 @@ export default class Vault extends EventEmitter {
     }
 
     // Get current private key for encryption by decrypting with passcode
-    this.currentPrivateKey = await getPrivateKeyFromPasscode(keyName, passcode, keys);
-    
+    this._unlockPrivateKey = await getPrivateKeyFromPasscode(keyName, passcode, keys);
+
     // Encrypt all existing data
     await this._encryptAllData();
-    
-    // Persist keys
-    this._persistKeys(keys);
-    this.keys = keys; // Update cached keys
-    
-    // Set unlock state for cross-tab sync
-    this.sessionStorage.set('unlockState', {
-      privateKey: this.currentPrivateKey,
-      keyName,
-      timestamp: Date.now()
-    });
 
-    this._setupAutoLock();
+    // Store keys
+    this._persistKeys(keys);
+    this._sessionStorage.set(this._getKey('keys'), keys);
+
+    // Store unlock state for cross-tab sync
+    const b64UnlockedKey = await getBase64PrivateKey(this._unlockPrivateKey);
+    this._sessionStorage.set(this._getKey('unlockPrivateKey'), b64UnlockedKey);
+
     this.emit('secure');
+    this._setupAutoLock();
   }
 
   /**
@@ -285,7 +290,21 @@ export default class Vault extends EventEmitter {
     }
 
     this._persistKeys(keys);
-    this.keys = keys; // Update cached keys
+    this._sessionStorage.set(this._getKey('keys'), keys);
+  }
+
+  /**
+   * It changes the settings of the vault with the given.
+   * It works in both locked and unlocked states.
+   * @param {Object} settings 
+   */
+  async changeKeys(keys) {
+    if (!this.isSecure()) {
+      return;
+    }
+
+    this._persistSettings(keys);
+    this._sessionStorage.set(this._getKey('settings'), settings);
   }
 
   /**
@@ -302,13 +321,23 @@ export default class Vault extends EventEmitter {
     await this._decryptAllData();
     
     // Remove keys
-    localStorage.removeItem(`${this.storagePrefix}_keys`);
-    this.keys = null; // Clear cached keys
-    this.currentPrivateKey = null;
-    this.sessionStorage.remove('unlockState');
-    
-    this._clearAutoLockTimer();
+    localStorage.removeItem(this._getKey('keys'));
+    this._sessionStorage.remove(this._getKey('keys'));
+    this._unlockPrivateKey = null;
+    this._sessionStorage.remove(this._getKey('unlockPrivateKey'));
     this.emit('insecure');
+    this._clearAutoLockTimer();
+  }
+
+  _clearSessionData() {
+    const sessionData = this._sessionStorage.getAll();
+    const keys = Object.keys(sessionData).filter(key => 
+      key.startsWith(Vault.dataPrefix)
+    );
+
+    for (const key of keys) {
+      this._sessionStorage.remove(key);
+    }
   }
 
   /**
@@ -321,20 +350,19 @@ export default class Vault extends EventEmitter {
       throw new Error('Cannot lock an insecure vault');
     }
 
-    this.sessionStorage.clear();
-    this.currentPrivateKey = null;
-    this.sessionStorage.remove('unlockState');
+    this._clearSessionData();
+    this._unlockPrivateKey = null;
+    this._sessionStorage.remove(this._getKey('unlockPrivateKey'));
+    this.emit('lock');
     this._clearAutoLockTimer();
     this._removeActivityListeners();
-    this.emit('lock');
   }
 
   /**
    * It checks if the vault is secure (has keys).
    */
   isSecure() {
-    // Use cached keys for better performance, fallback to persistent storage
-    const keys = this.keys || this._getPersistedKeys();
+    const keys = this._sessionStorage.get(this._getKey('keys'));
     return keys && Object.keys(keys).length > 0;
   }
 
@@ -345,7 +373,8 @@ export default class Vault extends EventEmitter {
     if (!this.isSecure()) {
       return false; // Insecure vault cannot be locked
     }
-    return !this.currentPrivateKey || !this.sessionStorage.get('unlockState');
+
+    return !this._unlockPrivateKey || !this._sessionStorage.get(this._getKey('unlockPrivateKey'));
   }
 
   /**
@@ -359,7 +388,7 @@ export default class Vault extends EventEmitter {
       throw new Error('Vault is locked. Unlock first to check keys.');
     }
 
-    return !!this.sessionStorage.get(key);
+    return !!this._sessionStorage.get(this._getDataKey(key));
   }
 
   /**
@@ -372,7 +401,7 @@ export default class Vault extends EventEmitter {
       throw new Error('Vault is locked. Unlock first to check if empty.');
     }
 
-    return Object.keys(this.sessionStorage.getAll()).length === 0;
+    return Object.keys(this._getDataFromSession()).length === 0;
   }
 
   /**
@@ -387,14 +416,10 @@ export default class Vault extends EventEmitter {
     this._clearAllPersistedData();
     
     // Clear session data
-    this.sessionStorage.clear();
+    this._sessionStorage.clear();
     
     // Reset state
-    this.currentPrivateKey = null;
-    this.keys = null; // Clear cached keys
-    this.settings = null; // Clear cached settings
-    this._clearAutoLockTimer();
-    this._removeActivityListeners();
+    this._unlockPrivateKey = null;
     
     this.emit('destroy');
   }
@@ -402,49 +427,51 @@ export default class Vault extends EventEmitter {
   // Private methods
   _getPersistedKeys() {
     try {
-      const keys = localStorage.getItem(`${this.storagePrefix}_keys`);
+      const keys = localStorage.getItem(this._getKey('keys'));
       return keys ? JSON.parse(keys) : null;
     } catch (error) {
-      throw new Error(`Vault load failed: Unable to parse persistent keys. Data may be corrupted. Error: ${error.message}`);
+      console.warn(`Failed to parse persisted keys: ${error.message}`);
+      return {};
     }
   }
 
   _persistKeys(keys) {
     if (keys && Object.keys(keys).length > 0) {
-      localStorage.setItem(`${this.storagePrefix}_keys`, JSON.stringify(keys));
+      localStorage.setItem(this._getKey('keys'), JSON.stringify(keys));
     } else {
-      localStorage.removeItem(`${this.storagePrefix}_keys`);
+      localStorage.setItem(this._getKey('keys'), {});
     }
   }
 
   _getPersistedSettings() {
     try {
-      const settings = localStorage.getItem(`${this.storagePrefix}_settings`);
-      return settings ? JSON.parse(settings) : null;
+      const settings = localStorage.getItem(this._getKey('settings'));
+      return settings ? JSON.parse(settings) : {};
     } catch (error) {
-      throw new Error(`Vault load failed: Unable to parse persistent settings. Data may be corrupted. Error: ${error.message}`);
+      console.warn(`Failed to parse persisted settings: ${error.message}`);
+      return {};
     }
   }
 
   _persistSettings(settings) {
-    localStorage.setItem(`${this.storagePrefix}_settings`, JSON.stringify(settings));
+    localStorage.setItem(this._getKey('settings'), JSON.stringify(settings));
   }
 
   async _loadDataToSession() {
-    if (!this.currentPrivateKey) {
+    if (!this._unlockPrivateKey) {
       return;
     }
 
     const keys = Object.keys(localStorage).filter(key => 
-      key.startsWith(`${this.storagePrefix}_data_`)
+      key.startsWith(Vault.dataPrefix)
     );
 
     for (const storageKey of keys) {
-      const dataKey = storageKey.replace(`${this.storagePrefix}_data_`, '');
+      const dataKey = storageKey.replace(`${Vault.dataPrefix}`, '');
       try {
         const encryptedData = JSON.parse(localStorage.getItem(storageKey));
-        const decrypted = await decrypt(this.currentPrivateKey, encryptedData);
-        this.sessionStorage.set(dataKey, decrypted);
+        const decrypted = await decrypt(this._unlockPrivateKey, encryptedData);
+        this._sessionStorage.set(storageKey, decrypted);
       } catch (error) {
         console.error(`Failed to decrypt data for key ${dataKey}:`, error);
       }
@@ -452,28 +479,32 @@ export default class Vault extends EventEmitter {
   }
 
   _setupAutoLock() {
-    if (!this.currentPrivateKey) {
+    const settings = this._sessionStorage.get(this._getKey('settings'));
+    if (!this.isSecure() || this.isLocked()) {
       return;
     }
 
     this._clearAutoLockTimer();
-    
-    if (!this.settings?.autoLockTimeout || this.settings.autoLockTimeout <= 0) {
+
+    if (!settings?.autoLockTimeout || settings.autoLockTimeout <= 0) {
       return;
     }
 
     const setupTimer = () => {
       this._clearAutoLockTimer();
-      this.autoLockTimer = setTimeout(() => {
+      this._autoLockTimer = setTimeout(() => {
         if (!this.isLocked()) {
           this.lock();
         }
-      }, this.settings.autoLockTimeout);
+      }, settings.autoLockTimeout);
     };
 
     // Set up activity listeners
     const activities = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
-    const resetTimer = () => setupTimer();
+    const resetTimer = () => {
+      this._sessionStorage.set(this._getKey('__activity__'), Date.now());
+      setupTimer();
+    };
 
     // Remove existing listeners
     this._removeActivityListeners();
@@ -481,54 +512,72 @@ export default class Vault extends EventEmitter {
     // Add new listeners
     activities.forEach(activity => {
       document.addEventListener(activity, resetTimer, true);
-      this.activityListeners.push({ event: activity, handler: resetTimer });
+      this._activityListeners.push({ event: activity, handler: resetTimer });
+    });
+
+    this._sessionStorage.subscribe((changes) => {
+      if (!has(changes, this._getKey('__activity__'))) {
+        return;
+      }
+
+      setupTimer();
     });
 
     setupTimer();
   }
 
   _clearAutoLockTimer() {
-    if (this.autoLockTimer) {
-      clearTimeout(this.autoLockTimer);
-      this.autoLockTimer = null;
+    if (this._autoLockTimer) {
+      clearTimeout(this._autoLockTimer);
+      this._autoLockTimer = null;
     }
   }
 
   _removeActivityListeners() {
-    this.activityListeners.forEach(({ event, handler }) => {
+    this._activityListeners.forEach(({ event, handler }) => {
       document.removeEventListener(event, handler, true);
     });
-    this.activityListeners = [];
+    this._activityListeners = [];
+  }
+
+  _getDataFromSession() {
+    const data = {};
+    const sessionData = this._sessionStorage.getAll();
+    const keys = Object.keys(sessionData).filter(key => 
+      key.startsWith(Vault.dataPrefix)
+    );
+
+    for (const key of keys) {
+      const dataKey = key.replace(Vault.dataPrefix, '');
+      data[dataKey] = sessionData[key];
+    }
+
+    return data;
   }
 
   async _encryptAllData() {
-    if (!this.currentPrivateKey) {
+    if (!this._unlockPrivateKey) {
       return;
     }
 
-    // Get all data from session or localStorage (for insecure mode)
-    const allData = this.isSecure() ? this.sessionStorage.getAll() : this._getAllPlainData();
+    // Get all data from session
+    const allData = this._getDataFromSession();
 
     // Encrypt and store each item
     for (const [key, value] of Object.entries(allData)) {
       const stringValue = typeof value === 'string' ? value : JSON.stringify(value);
-      await this._encryptAndStore(key, stringValue);
-    }
-
-    // Remove plain text data if transitioning from insecure
-    if (!this.isSecure()) {
-      this._clearPlainData();
+      await this._encryptAndStore(this._getDataKey(key), stringValue);
     }
   }
 
   async _encryptAndStore(key, value) {
-    if (!this.currentPrivateKey) {
+    if (!this._unlockPrivateKey) {
       throw new Error('No private key available for encryption');
     }
 
     try {
-      const encrypted = await encrypt(this.currentPrivateKey, value);
-      localStorage.setItem(`${this.storagePrefix}_data_${key}`, JSON.stringify(encrypted));
+      const encrypted = await encrypt(this._unlockPrivateKey, value);
+      localStorage.setItem(key, JSON.stringify(encrypted));
     } catch (error) {
       console.error('Failed to encrypt and store data:', error);
       throw error;
@@ -538,11 +587,11 @@ export default class Vault extends EventEmitter {
   _getAllPlainData() {
     const data = {};
     const keys = Object.keys(localStorage).filter(key => 
-      key.startsWith(`${this.storagePrefix}_data_`)
+      key.startsWith(Vault.dataPrefix)
     );
 
     for (const storageKey of keys) {
-      const dataKey = storageKey.replace(`${this.storagePrefix}_data_`, '');
+      const dataKey = storageKey.replace(Vault.dataPrefix, '');
       data[dataKey] = localStorage.getItem(storageKey);
     }
 
@@ -551,29 +600,29 @@ export default class Vault extends EventEmitter {
 
   _clearPlainData() {
     const keys = Object.keys(localStorage).filter(key => 
-      key.startsWith(`${this.storagePrefix}_data_`)
+      key.startsWith(Vault.dataPrefix)
     );
 
     keys.forEach(key => localStorage.removeItem(key));
   }
 
   async _decryptAllData() {
-    if (!this.currentPrivateKey) {
+    if (!this._unlockPrivateKey) {
       throw new Error('Vault must be unlocked to decrypt data');
     }
 
     const keys = Object.keys(localStorage).filter(key => 
-      key.startsWith(`${this.storagePrefix}_data_`)
+      key.startsWith(Vault.dataPrefix)
     );
 
     for (const storageKey of keys) {
-      const dataKey = storageKey.replace(`${this.storagePrefix}_data_`, '');
+      const dataKey = storageKey.replace(Vault.dataPrefix, '');
       try {
         const encryptedData = JSON.parse(localStorage.getItem(storageKey));
-        const decrypted = await decrypt(this.currentPrivateKey, encryptedData);
+        const decrypted = await decrypt(this._unlockPrivateKey, encryptedData);
         
         // Store as plain text
-        localStorage.setItem(`${this.storagePrefix}_data_${dataKey}`, decrypted);
+        localStorage.setItem(this._getDataKey(dataKey), decrypted);
       } catch (error) {
         console.error(`Failed to decrypt data for key ${dataKey}:`, error);
       }
@@ -582,7 +631,7 @@ export default class Vault extends EventEmitter {
 
   _clearAllPersistedData() {
     const keys = Object.keys(localStorage).filter(key => 
-      key.startsWith(this.storagePrefix)
+      key.startsWith(Vault.prefix)
     );
     keys.forEach(key => localStorage.removeItem(key));
   }

@@ -5,10 +5,12 @@
   "type": "module",
   "main": "vault.js",
   "exports": {
-    ".": "./vault.js",
-    "./utils": "./utils.js"
+    ".": "./vault.js"
   },
   "scripts": {
+    "start": "web-dev-server --node-resolve --watch --open /demo/",
+    "dev": "web-dev-server --node-resolve --watch",
+    "serve": "web-dev-server --node-resolve",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
@@ -24,11 +26,9 @@
   "author": "Dreamworld",
   "license": "MIT",
   "dependencies": {
-    "eventemitter3": "^4.0.7",
-    "@dreamworld/session-storage": "^1.0.0"
-  },
-  "peerDependencies": {
-    "@dreamworld/session-storage": "^1.0.0"
+    "@dreamworld/event-emitter": "^1.1.0",
+    "@dreamworld/session-storage": "^1.0.0-init.2",
+    "lodash-es": "^4.17.21"
   },
   "repository": {
     "type": "git",
@@ -37,5 +37,8 @@
   "bugs": {
     "url": "https://github.com/dreamworld/vault/issues"
   },
-  "homepage": "https://github.com/dreamworld/vault#readme"
+  "homepage": "https://github.com/dreamworld/vault#readme",
+  "devDependencies": {
+    "@web/dev-server": "^0.4.0"
+  }
 }
