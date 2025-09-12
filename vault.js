@@ -289,8 +289,16 @@ export default class Vault extends EventEmitter {
       return;
     }
 
-    this._persistKeys(keys);
-    this._sessionStorage.set(this._getKey('keys'), keys);
+    if (!this.isLocked()) {
+      if (!keys || Object.keys(keys).length === 0) {
+        // If no keys, make vault insecure
+        await this.insecure();
+        return;
+      }
+
+      this._persistKeys(keys);
+      this._sessionStorage.set(this._getKey('keys'), keys);
+    }
   }
 
   /**
@@ -298,12 +306,12 @@ export default class Vault extends EventEmitter {
    * It works in both locked and unlocked states.
    * @param {Object} settings 
    */
-  async changeKeys(keys) {
+  async changeSettings(settings) {
     if (!this.isSecure()) {
       return;
     }
 
-    this._persistSettings(keys);
+    this._persistSettings(settings);
     this._sessionStorage.set(this._getKey('settings'), settings);
   }
 

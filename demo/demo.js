@@ -390,9 +390,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateStatus();
     
     // Set some sample data for testing
-    document.getElementById('keys-json').value = JSON.stringify({
-        password: "eyJrZGYiOiJwYmtkZjItc2hhMjU2IiwicGFyYW1zIjp7InNhbHQiOiJGZ3JQX3ozOGZPZ2lFSF9MUm1VS09nIiwiaXRlciI6MTAwMDAwLCJpdiI6IjU1NVBLT2dWc2NuWU9lMjcifSwiY3QiOiJwbkstSGNWekFJY0dRaFQ0b2VNNndnRGtwaDFVcG9vZTl3ZVE3U1ROUkN1d0ZTc2tUczBwUlV1ODBISDJlX3J3In0"
-    }, null, 2);
+    document.getElementById('keys-json').value = JSON.stringify({"password":"eyJrZGYiOiJwYmtkZjItc2hhMjU2IiwicGFyYW1zIjp7InNhbHQiOiJCLWpWMF9sRGpZd2paTXdIaWVRblRRIiwiaXRlciI6MTAwMDAwLCJpdiI6ImQ1dElkZmpockI0eHl3UDcifSwiY3QiOiI5N3NlWWZBWkNOWUVWMlM0ZTlXMkdKZlJYcG9DdUtLTEVQc2p3MUhnRW84NjFCZ2tEdEZFd240dlZPcjZHblBqIn0"}, null, 2);
     
     document.getElementById('json-value').value = JSON.stringify({
         name: "John Doe",
@@ -403,3 +401,70 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }, null, 2);
 });
+
+window.generateTestKeys = async function() {
+    try {
+        const passcode = "123456";
+        const authProvider = "password";
+        const privateKey = "Vm1iawlOPYb5ZwokbvJomgv21gxhhXg5Jy3fEEsUtl8=";
+
+        const rawPrivateKey = base64ToBuf(privateKey);
+        // console.log("Raw private key:", rawPrivateKey);
+
+        // 2. Derive AES key from passcode
+        const salt = crypto.getRandomValues(new Uint8Array(16));
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+
+        const keyMaterial = await crypto.subtle.importKey("raw", strToBuf(passcode), { name: "PBKDF2" }, false, ["deriveKey"]);
+        const aesKey = await crypto.subtle.deriveKey(
+        { name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" },
+        keyMaterial,
+        { name: "AES-GCM", length: 256 },
+        true,
+        ["encrypt", "decrypt"]
+        );
+
+        // 3. Encrypt private key with passcode
+        const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, aesKey, rawPrivateKey);
+
+        // 4. Store vault entry
+        const privateKeyByAuths = {
+            [authProvider]: base64url(
+                strToBuf(
+                JSON.stringify({
+                    kdf: "pbkdf2-sha256",
+                    params: {
+                    salt: base64url(salt),
+                    iter: 100000,
+                    iv: base64url(iv),
+                    },
+                    ct: base64url(ct),
+                })
+                )
+            ),
+        };
+
+        log(`Key generated ${JSON.stringify(privateKeyByAuths)}`, 'success');
+    } catch (error) {
+        log(`Key generation failed: ${JSON.stringify(error)}`, 'error');
+    }
+};
+
+function bufToBase64(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+}
+    
+function strToBuf(str) {
+    return new TextEncoder().encode(str);
+}
+
+const base64url = (buf) => {
+  return bufToBase64(buf)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+};
+
+function base64ToBuf(b64) {
+  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+}
