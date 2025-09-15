@@ -32,12 +32,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/dreamworld/vault.git"
+    "url": "https://github.com/DreamworldSolutions/vault.git"
   },
   "bugs": {
-    "url": "https://github.com/dreamworld/vault/issues"
+    "url": "https://github.com/DreamworldSolutions/vault/issues"
   },
-  "homepage": "https://github.com/dreamworld/vault#readme",
+  "homepage": "https://github.com/DreamworldSolutions/vault#readme",
   "devDependencies": {
     "@web/dev-server": "^0.4.0"
   }
