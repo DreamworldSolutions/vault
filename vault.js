@@ -56,6 +56,7 @@ import { getPrivateKeyFromPasscode, encrypt, decrypt, getBase64PrivateKey, priva
  * - 'lock': Dispatched when the vault is locked.
  * - 'destroy': Dispatched when the vault is destroyed.
  */
+
 export default class Vault extends EventEmitter {
   static prefix = 'vault';
   static dataPrefix = `${Vault.prefix}_data_`;
