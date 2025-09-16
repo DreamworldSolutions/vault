@@ -103,6 +103,8 @@ export default class Vault extends EventEmitter {
     this._sessionStorage.set(this._getKey('keys'), keys);
     this._sessionStorage.set(this._getKey('settings'), settings);
 
+    this._loadPlainDataToSession();
+
     // Set unlock state from session storage if available
     this._syncUnlockPrivateKey();
 
@@ -112,8 +114,10 @@ export default class Vault extends EventEmitter {
 
   _setUnlockKey(b64key) {
     if (b64key) {
-      const privateKey = privateKeyFromBase64(b64key);
-      this._unlockPrivateKey = privateKey;
+      this._unlockPrivateKey = true;
+      privateKeyFromBase64(b64key).then(key => {
+        this._unlockPrivateKey = key;
+      });
     }
   }
 
@@ -290,16 +294,8 @@ export default class Vault extends EventEmitter {
       return;
     }
 
-    if (!this.isLocked()) {
-      if (!keys || Object.keys(keys).length === 0) {
-        // If no keys, make vault insecure
-        await this.insecure();
-        return;
-      }
-
-      this._persistKeys(keys);
-      this._sessionStorage.set(this._getKey('keys'), keys);
-    }
+    this._persistKeys(keys);
+    this._sessionStorage.set(this._getKey('keys'), keys);
   }
 
   /**
@@ -314,6 +310,7 @@ export default class Vault extends EventEmitter {
 
     this._persistSettings(settings);
     this._sessionStorage.set(this._getKey('settings'), settings);
+    this._setupAutoLock();
   }
 
   /**
@@ -336,6 +333,7 @@ export default class Vault extends EventEmitter {
     this._sessionStorage.remove(this._getKey('unlockPrivateKey'));
     this.emit('insecure');
     this._clearAutoLockTimer();
+    this._removeActivityListeners();
   }
 
   _clearSessionData() {
@@ -466,6 +464,24 @@ export default class Vault extends EventEmitter {
     localStorage.setItem(this._getKey('settings'), JSON.stringify(settings));
   }
 
+  _loadPlainDataToSession() {
+    const keys = Object.keys(localStorage).filter(key => 
+      key.startsWith(Vault.dataPrefix)
+    );
+
+    for (const storageKey of keys) {
+      let data = localStorage.getItem(storageKey);
+
+      try {
+        data = JSON.parse(data);
+      } catch (error) {
+        // ignore
+      }
+      
+      this._sessionStorage.set(storageKey, data);
+    }
+  }
+
   async _loadDataToSession() {
     if (!this._unlockPrivateKey) {
       return;
@@ -505,7 +521,7 @@ export default class Vault extends EventEmitter {
         if (!this.isLocked()) {
           this.lock();
         }
-      }, settings.autoLockTimeout);
+      }, settings.autoLockTimeout * 60 * 1000);
     };
 
     // Set up activity listeners
