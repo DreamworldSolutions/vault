@@ -66,7 +66,7 @@ export default class Vault extends EventEmitter {
   
   constructor() {
     super();
-    this._sessionStorage = new SessionStorage();
+    this._sessionStorage = new SessionStorage({ timeoutOnCloseTab: 10000 }); // 10 seconds
 
     this._autoLockTimer = null;
     this._activityListeners = [];
@@ -176,7 +176,7 @@ export default class Vault extends EventEmitter {
       return true;
     } catch (error) {
       console.warn('Failed to unlock vault:', error);
-      return false;
+      throw { code: 'INVALID_PASSCODE', message: 'Invalid passcode' };
     }
   }
 
