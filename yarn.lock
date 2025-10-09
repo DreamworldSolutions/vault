@@ -26,10 +26,10 @@
   resolved "https://registry.yarnpkg.com/@dreamworld/event-emitter/-/event-emitter-1.1.0.tgz#576af754e42abbbb24aee07e47f76d589656bd72"
   integrity sha512-B2qURdBRBrr2+6figkq6a+eGtAcGANkYhqLGsrNEr8qePD6jWhGx9DZvw5ql1qLIne35b4VsheYLSh24ttQMxA==
 
-"@dreamworld/session-storage@^1.0.0-init.2":
-  version "1.0.0-init.2"
-  resolved "https://registry.yarnpkg.com/@dreamworld/session-storage/-/session-storage-1.0.0-init.2.tgz#857eef432cef5bfa8d1fcd65d82ad1e3f6b4e962"
-  integrity sha512-6GlkrZtsDk+EVUSAr7VY4odqqeoCVWEYbyeItU3C9h7r0H7P1wrZ1cGYoRRYv9YxrxsQzMaSrNsYHMwfbJ89XQ==
+"@dreamworld/session-storage@^1.0.0-init.3":
+  version "1.0.0-init.3"
+  resolved "https://registry.yarnpkg.com/@dreamworld/session-storage/-/session-storage-1.0.0-init.3.tgz#a1bb01c9348d4edb531ecfaad74ed51caab92122"
+  integrity sha512-oqi9GvCNlZOGhnI7YMA1NOiqZ8n2mez7Ce23oUP3wq9URwHmK0hu+4iuqQzjer72TaaQznVJSpyLO4vGIXpbKA==
   dependencies:
     "@dreamworld/uuid-base62" "^1.2.0"
 

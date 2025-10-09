@@ -34,23 +34,23 @@
   },
   "homepage": "https://github.com/DreamworldSolutions/vault#readme",
   "devDependencies": {
-    "semantic-release": "17.0.8",
-    "@web/dev-server": "^0.4.0"
+    "@web/dev-server": "^0.4.0",
+    "semantic-release": "17.0.8"
   },
   "release": {
     "branches": [
       "+([0-9])?(.{+([0-9]),x}).x",
       "main",
       {
-          "name": "feature/*",
-          "prerelease": "${name.replace(/^feature\\//g, \"\")}",
-          "channel": "${name.replace(/^feature\\//g, \"\")}"
+        "name": "feature/*",
+        "prerelease": "${name.replace(/^feature\\//g, \"\")}",
+        "channel": "${name.replace(/^feature\\//g, \"\")}"
       }
     ]
   },
   "dependencies": {
     "@dreamworld/event-emitter": "^1.1.0",
-    "@dreamworld/session-storage": "^1.0.0-init.2",
+    "@dreamworld/session-storage": "^1.0.0-init.3",
     "lodash-es": "^4.17.21"
   }
 }
