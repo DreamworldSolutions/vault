@@ -510,7 +510,8 @@ export default class Vault extends EventEmitter {
     }
 
     this._clearAutoLockTimer();
-
+    // Remove existing listeners
+    this._removeActivityListeners();
     if (!settings?.autoLockTimeout || settings.autoLockTimeout <= 0) {
       return;
     }
@@ -530,9 +531,6 @@ export default class Vault extends EventEmitter {
       this._sessionStorage.set(this._getKey('__activity__'), Date.now());
       setupTimer();
     };
-
-    // Remove existing listeners
-    this._removeActivityListeners();
 
     // Add new listeners
     activities.forEach(activity => {
