@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vault Library Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .status.secure { background-color: #d4edda; color: #155724; }
+        .status.insecure { background-color: #f8d7da; color: #721c24; }
+        .status.locked { background-color: #fff3cd; color: #856404; }
+        .status.unlocked { background-color: #d1ecf1; color: #0c5460; }
+        
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        
+        .control-group {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+        }
+        
+        .control-group h3 {
+            margin-top: 0;
+            color: #495057;
+        }
+        
+        input, button, textarea, select {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
+        button:hover {
+            background-color: #0056b3;
+        }
+        
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        
+        .danger {
+            background-color: #dc3545 !important;
+        }
+        
+        .danger:hover {
+            background-color: #c82333 !important;
+        }
+        
+        .success {
+            background-color: #28a745 !important;
+        }
+        
+        .success:hover {
+            background-color: #218838 !important;
+        }
+        
+        .log {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 10px;
+            height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+        }
+        
+        .data-view {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 10px;
+            min-height: 100px;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid #ddd;
+            margin-bottom: 20px;
+        }
+        
+        .tab {
+            padding: 10px 20px;
+            background: #f8f9fa;
+            border: 1px solid #ddd;
+            border-bottom: none;
+            cursor: pointer;
+            margin-right: 5px;
+        }
+        
+        .tab.active {
+            background: white;
+            border-bottom: 1px solid white;
+            margin-bottom: -1px;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <h1>Vault Library Demo</h1>
+    
+    <div class="container">
+        <h2>Status</h2>
+        <div id="vault-status" class="status">Initializing...</div>
+        <div id="event-log" class="log"></div>
+    </div>
+
+    <div class="tabs">
+        <div class="tab active" onclick="showTab('basic')">Basic Operations</div>
+        <div class="tab" onclick="showTab('security')">Security Operations</div>
+        <div class="tab" onclick="showTab('data')">Data Management</div>
+        <div class="tab" onclick="showTab('advanced')">Advanced</div>
+    </div>
+
+    <div id="basic" class="tab-content active">
+        <div class="controls">
+            <div class="control-group">
+                <h3>Unlock Vault</h3>
+                <input type="text" id="unlock-keyname" placeholder="Key Name (e.g., password)" value="password">
+                <input type="password" id="unlock-passcode" placeholder="Passcode">
+                <button onclick="unlockVault()">Unlock</button>
+            </div>
+            
+            <div class="control-group">
+                <h3>Store Data</h3>
+                <input type="text" id="store-key" placeholder="Key">
+                <input type="text" id="store-value" placeholder="Value">
+                <button onclick="storeData()">Store</button>
+            </div>
+            
+            <div class="control-group">
+                <h3>Retrieve Data</h3>
+                <input type="text" id="get-key" placeholder="Key">
+                <button onclick="getData()">Get</button>
+                <div id="get-result" class="data-view"></div>
+            </div>
+            
+            <div class="control-group">
+                <h3>Remove Data</h3>
+                <input type="text" id="remove-key" placeholder="Key">
+                <button onclick="removeData()">Remove</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="security" class="tab-content">
+        <div class="controls">
+            <div class="control-group">
+                <h3>Make Secure</h3>
+                <textarea id="keys-json" placeholder='{"password": "encrypted_key_data", "github": "encrypted_key_data"}'></textarea>
+                <input type="text" id="secure-keyname" placeholder="Key Name" value="password">
+                <input type="password" id="secure-passcode" placeholder="Passcode">
+                <button onclick="makeSecure()" class="success">Make Secure</button>
+            </div>
+            
+            <div class="control-group">
+                <h3>Change Keys</h3>
+                <textarea id="new-keys-json" placeholder='{"password": "new_encrypted_key_data"}'></textarea>
+                <button onclick="changeKeys()">Change Keys</button>
+            </div>
+            
+            <div class="control-group">
+                <h3>Lock/Unlock</h3>
+                <button onclick="lockVault()" class="danger">Lock Vault</button>
+                <button onclick="makeInsecure()" class="danger">Make Insecure</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="data" class="tab-content">
+        <div class="controls">
+            <div class="control-group">
+                <h3>Vault Data</h3>
+                <button onclick="refreshData()">Refresh Data View</button>
+                <div id="vault-data" class="data-view"></div>
+            </div>
+            
+            <div class="control-group">
+                <h3>Check Operations</h3>
+                <input type="text" id="check-key" placeholder="Key to check">
+                <button onclick="checkKey()">Has Key</button>
+                <button onclick="checkEmpty()">Is Empty</button>
+                <div id="check-results" class="data-view"></div>
+            </div>
+            
+            <div class="control-group">
+                <h3>JSON Data</h3>
+                <input type="text" id="json-key" placeholder="Key">
+                <textarea id="json-value" placeholder='{"name": "John", "age": 30}'></textarea>
+                <button onclick="storeJsonData()">Store JSON</button>
+                <button onclick="getJsonData()">Get JSON</button>
+                <div id="json-result" class="data-view"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="advanced" class="tab-content">
+        <div class="controls">
+            <div class="control-group">
+                <h3>Generate Test Keys</h3>
+                <button onclick="generateTestKeys()">Generate Encrypted Keys</button>
+                <div id="generated-keys" class="data-view"></div>
+            </div>
+            
+            <div class="control-group">
+                <h3>Bulk Operations</h3>
+                <input type="number" id="bulk-count" placeholder="Number of items" value="10">
+                <button onclick="bulkStore()">Bulk Store</button>
+                <button onclick="bulkRetrieve()">Bulk Retrieve</button>
+                <div id="bulk-results" class="data-view"></div>
+            </div>
+            
+            <div class="control-group">
+                <h3>Danger Zone</h3>
+                <button onclick="destroyVault()" class="danger">Destroy Vault</button>
+                <button onclick="clearLocalStorage()" class="danger">Clear LocalStorage</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="demo.js"></script>
+    <script type="module" src="utils.js"></script>
+</body>
+</html>
