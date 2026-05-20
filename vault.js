@@ -317,15 +317,35 @@ export default class Vault extends EventEmitter {
    * It makes the vault insecure (removes all keys).
    * All encrypted stored values are decrypted and stored in plain text in persistent storage.
    * It dispatches 'insecure' event on itself; when the vault is made insecure.
+   * Idempotent and race-safe: if another tab has already moved the vault to
+   * insecure (a `storage` event arrived mid-call and cleared `_unlockPrivateKey`),
+   * this method returns cleanly instead of throwing.
    */
   async insecure() {
+    // Already insecure (e.g. another tab finished first). Nothing to do.
+    if (!this.isSecure()) {
+      return;
+    }
+
     if (this.isLocked()) {
       throw new Error('Vault is locked. Unlock first to make it insecure.');
     }
 
-    // Decrypt all data and store as plain text
-    await this._decryptAllData();
-    
+    // Snapshot the unlock key locally so a concurrent cross-tab clear of
+    // `_unlockPrivateKey` mid-call doesn't break `_decryptAllData`.
+    const unlockKey = this._unlockPrivateKey;
+    try {
+      await this._decryptAllData(unlockKey);
+    } catch (e) {
+      // If another tab raced ahead and finished the insecure flow (which
+      // removes `vault_keys` from storage), `isSecure()` is now false. Treat
+      // it as already-done and exit cleanly.
+      if (!this.isSecure()) {
+        return;
+      }
+      throw e;
+    }
+
     // Remove keys
     localStorage.removeItem(this._getKey('keys'));
     this._sessionStorage.remove(this._getKey('keys'));
@@ -629,12 +649,12 @@ export default class Vault extends EventEmitter {
     keys.forEach(key => localStorage.removeItem(key));
   }
 
-  async _decryptAllData() {
-    if (!this._unlockPrivateKey) {
+  async _decryptAllData(unlockKey = this._unlockPrivateKey) {
+    if (!unlockKey) {
       throw new Error('Vault must be unlocked to decrypt data');
     }
 
-    const keys = Object.keys(localStorage).filter(key => 
+    const keys = Object.keys(localStorage).filter(key =>
       key.startsWith(Vault.dataPrefix)
     );
 
@@ -642,8 +662,8 @@ export default class Vault extends EventEmitter {
       const dataKey = storageKey.replace(Vault.dataPrefix, '');
       try {
         const encryptedData = JSON.parse(localStorage.getItem(storageKey));
-        const decrypted = await decrypt(this._unlockPrivateKey, encryptedData);
-        
+        const decrypted = await decrypt(unlockKey, encryptedData);
+
         // Store as plain text
         localStorage.setItem(this._getDataKey(dataKey), decrypted);
       } catch (error) {
